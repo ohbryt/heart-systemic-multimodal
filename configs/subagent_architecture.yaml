@@ -31,7 +31,8 @@ agents:
   A4-Integration:
     placeholder: true
   A5-DeepLearning:
-    placeholder: true
+    script: scripts/run_iris_model.py
+    outputs: [data/reports/iris_key_driver_scores.csv, data/reports/iris_evaluation.csv]
   A6-InSilicoValidation:
     placeholder: true
   A7-TranslationalScreening:
