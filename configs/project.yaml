@@ -1,0 +1,42 @@
+project:
+  name: muscle_adipose_multiomics
+  date: 2026-03-03
+paths:
+  root: .
+  registry_dir: data/registry
+  reports_dir: data/reports
+artifacts:
+  literature_registry_csv: data/registry/literature_registry.csv
+  dataset_registry_csv: data/registry/dataset_registry.csv
+  candidate_board_template_csv: data/reports/candidate_board_template.csv
+  wave0_summary_md: data/reports/wave0_summary.md
+queries:
+  literature_topics:
+    - muscle stem cell aging differentiation
+    - sarcopenia metabolism myokines adipokines
+    - skeletal muscle mitochondrial aging exercise
+    - muscle adipose crosstalk inflammation metabolism
+    - satellite cells senescence regeneration aging
+  dataset_queries:
+    bulk_rna:
+      - sarcopenia muscle RNA-seq
+      - aging skeletal muscle transcriptome
+    scrna:
+      - skeletal muscle single cell RNA-seq aging
+      - satellite cell single cell aging
+    spatial:
+      - spatial transcriptomics skeletal muscle aging
+      - spatial transcriptomics sarcopenia
+    epigenomics:
+      - skeletal muscle ATAC-seq aging
+    proteomics:
+      - sarcopenia skeletal muscle proteomics
+      - muscle aging proteomics
+    metabolomics:
+      - sarcopenia metabolomics skeletal muscle
+      - muscle aging metabolomics
+limits:
+  pubmed_retmax_per_query: 20
+  geo_retmax_per_query: 10
+  pride_page_size: 10
+  max_records_per_modality: 20

@@ -1,0 +1,39 @@
+controller: A0-Orchestrator
+execution_mode: parallel_staged
+waves:
+  wave0:
+    parallel_agents: [A1-Literature, A2-DatasetDiscovery, A8-MLOpsInfra]
+    outputs:
+      - data/registry/literature_registry.csv
+      - data/registry/dataset_registry.csv
+      - data/reports/wave0_status.json
+  wave1:
+    dependencies: [wave0]
+    parallel_agents: [A3-IngestionQC]
+  wave2:
+    dependencies: [wave1]
+    parallel_agents: [A4-Integration, A5-DeepLearning, A6-InSilicoValidation]
+  wave3:
+    dependencies: [wave2]
+    parallel_agents: [A7-TranslationalScreening]
+agents:
+  A1-Literature:
+    script: scripts/run_literature_agent.py
+    outputs: [data/registry/literature_registry.csv]
+  A2-DatasetDiscovery:
+    script: scripts/run_dataset_discovery.py
+    outputs: [data/registry/dataset_registry.csv]
+  A8-MLOpsInfra:
+    script: scripts/check_structure.sh
+    outputs: [data/reports/wave0_status.json]
+  A3-IngestionQC:
+    placeholder: true
+  A4-Integration:
+    placeholder: true
+  A5-DeepLearning:
+    placeholder: true
+  A6-InSilicoValidation:
+    placeholder: true
+  A7-TranslationalScreening:
+    script: scripts/build_candidate_board.py
+    outputs: [data/reports/candidate_board_template.csv]
