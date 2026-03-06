@@ -24,8 +24,7 @@ def test_ranking_loss():
     head = KeyDriverRankingHead(in_dim=128, hidden_dim=64)
     x = torch.randn(20, 128)
     scores = head(x)
-    pos_scores = scores[:10]
-    neg_scores = scores[10:]
-    loss = head.compute_loss(pos_scores, neg_scores)
+    labels = torch.cat([torch.ones(10), torch.zeros(10)])
+    loss = head.compute_loss(scores, labels)
     assert loss.item() >= 0
     assert loss.requires_grad

@@ -12,6 +12,7 @@ class ModalityData:
     features: torch.Tensor  # (n_genes, n_features)
     gene_ids: List[int]     # Entrez-style integer IDs
     modality: str
+    gene_names: List[str] | None = None
 
     @property
     def n_genes(self) -> int:
@@ -42,6 +43,7 @@ class SyntheticDataGenerator:
     def generate(self) -> Dict[str, ModalityData]:
         rng = torch.Generator().manual_seed(self.seed)
         gene_ids = list(range(1, self.n_genes + 1))
+        gene_names = self._generate_gene_names()
         data = {}
         for modality, n_feat in MODALITY_FEATURES.items():
             features = self._generate_modality(modality, n_feat, rng)
@@ -49,8 +51,32 @@ class SyntheticDataGenerator:
                 features=features,
                 gene_ids=gene_ids,
                 modality=modality,
+                gene_names=gene_names,
             )
         return data
+
+    def _generate_gene_names(self) -> List[str]:
+        """Generate synthetic gene names, seeding ~20% with known sarcopenia genes."""
+        from src.data.label_builder import SARCOPENIA_GENES
+
+        known = sorted(SARCOPENIA_GENES)
+        n_known = min(len(known), self.n_genes // 5)
+        # Deterministic selection from known genes
+        rng_py = torch.Generator().manual_seed(self.seed)
+        perm = torch.randperm(len(known), generator=rng_py)[:n_known].tolist()
+        selected_known = [known[i] for i in perm]
+
+        # Fill the rest with synthetic names
+        n_synthetic = self.n_genes - n_known
+        synthetic = [f"GENE{i:04d}" for i in range(n_synthetic)]
+
+        # Interleave: place known genes at deterministic positions
+        names = synthetic.copy()
+        insert_positions = torch.randperm(self.n_genes, generator=rng_py)[:n_known].sort().values.tolist()
+        for pos, gene in zip(insert_positions, selected_known):
+            names.insert(pos, gene)
+
+        return names[:self.n_genes]
 
     def _generate_modality(
         self, modality: str, n_features: int, rng: torch.Generator

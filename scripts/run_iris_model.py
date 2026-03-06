@@ -11,6 +11,7 @@ import pandas as pd
 import torch
 
 from src.data.graph_builder import GraphBuilder
+from src.data.label_builder import build_labels
 from src.data.synthetic_generator import MODALITY_FEATURES, SyntheticDataGenerator
 from src.models.iris_model import IrisModel
 from src.training.evaluator import IrisEvaluator
@@ -21,47 +22,70 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _make_labels(n_genes: int, seed: int = 42) -> torch.Tensor:
-    """Create supervision labels. In production, map from literature registry."""
-    rng = torch.Generator().manual_seed(seed)
-    labels = torch.zeros(n_genes)
-    n_pos = max(1, n_genes // 5)
-    pos_idx = torch.randperm(n_genes, generator=rng)[:n_pos]
-    labels[pos_idx] = 1.0
-    return labels
-
-
 def main():
     parser = argparse.ArgumentParser(description="IRIS multimodal deep model")
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic data")
+    parser.add_argument("--real", action="store_true", help="Use real data via A3 ingestion")
     parser.add_argument("--n-genes", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default="data/reports")
     args = parser.parse_args()
 
-    logger.info("IRIS pipeline starting (synthetic=%s, n_genes=%d)", args.synthetic, args.n_genes)
+    use_real = args.real and not args.synthetic
+    logger.info("IRIS pipeline starting (mode=%s, n_genes=%d)",
+                "real" if use_real else "synthetic", args.n_genes)
 
-    if args.synthetic:
+    gene_names: list[str] | None = None
+
+    if use_real:
+        from src.ingestion.orchestrator import IngestionOrchestrator
+        orch = IngestionOrchestrator(
+            registry_path="data/registry/dataset_registry.csv",
+            output_dir="data",
+            n_genes_fallback=args.n_genes,
+            seed=args.seed,
+        )
+        data = orch.run()
+        gene_ids = data["bulk_rna"].gene_ids
+        gene_names = data["bulk_rna"].gene_names
+        modality_tensors = {mod: data[mod].features for mod in MODALITY_FEATURES if mod in data}
+        args.n_genes = len(gene_ids)
+    elif args.synthetic:
         gen = SyntheticDataGenerator(n_genes=args.n_genes, seed=args.seed)
         data = gen.generate()
         gene_ids = data["bulk_rna"].gene_ids
+        gene_names = data["bulk_rna"].gene_names
         modality_tensors = {mod: data[mod].features for mod in MODALITY_FEATURES}
     else:
-        logger.error("Real data mode requires A3 ingestion pipeline. Use --synthetic.")
+        logger.error("Specify --synthetic or --real.")
         sys.exit(1)
 
+    # Normalize modality tensors (z-score per feature)
+    for mod in modality_tensors:
+        t = modality_tensors[mod]
+        mean = t.mean(dim=0, keepdim=True)
+        std = t.std(dim=0, keepdim=True) + 1e-8
+        t = (t - mean) / std
+        t = torch.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
+        modality_tensors[mod] = t
+    logger.info("Applied z-score normalization to %d modalities", len(modality_tensors))
+
+    # Force graph rebuild when using real data (avoid stale cache)
     graph_cache = "data/graphs/ppi_pathway_graph.pt"
+    if use_real:
+        Path(graph_cache).unlink(missing_ok=True)
+
     builder = GraphBuilder(
-        use_api=not args.synthetic,
+        use_api=use_real,
         seed=args.seed,
         cache_path=graph_cache,
     )
-    graph = builder.build(gene_ids)
+    graph = builder.build(gene_ids, gene_names=gene_names)
     logger.info("Graph: %d nodes, %d edges", graph.num_nodes, graph.edge_index.shape[1])
 
-    labels = _make_labels(args.n_genes, args.seed)
+    labels = build_labels(gene_names, gene_ids, seed=args.seed)
     n_pos = int(labels.sum().item())
     logger.info("Labels: %d positive, %d negative", n_pos, args.n_genes - n_pos)
 
@@ -75,6 +99,7 @@ def main():
     model.eval()
     with torch.no_grad():
         scores = model(modality_tensors, graph)
+    scores = torch.nan_to_num(scores, nan=0.0)
 
     evaluator = IrisEvaluator()
     metrics = evaluator.evaluate(scores, labels)
