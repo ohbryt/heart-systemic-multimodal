@@ -1,0 +1,54 @@
+{
+  "project": "heart_systemic_multimodal_project",
+  "version": "1.0.0",
+  "groups": [
+    {
+      "name": "syntax",
+      "assertions": [
+        { "id": "s1", "check": "All .py files pass ast.parse()", "cmd": "find src -name '*.py' -exec python3 -c \"import ast; ast.parse(open('{}').read())\" \;" },
+        { "id": "s2", "check": "main.py passes ast.parse()", "cmd": "python3 -c \"import ast; ast.parse(open('main.py').read())\"" },
+        { "id": "s3", "check": "No SyntaxError in any file", "cmd": "python3 -m py_compile main.py" }
+      ]
+    },
+    {
+      "name": "imports",
+      "assertions": [
+        { "id": "i1", "check": "src package imports without error" },
+        { "id": "i2", "check": "utils module imports (config_loader, logger, memory)" },
+        { "id": "i3", "check": "scoring module imports" },
+        { "id": "i4", "check": "secretome module imports" },
+        { "id": "i5", "check": "overlap module imports" },
+        { "id": "i6", "check": "ranking module imports" },
+        { "id": "i7", "check": "reporting module imports" },
+        { "id": "i8", "check": "responders module imports" },
+        { "id": "i9", "check": "downloaders module imports" },
+        { "id": "i10", "check": "preprocessing module imports" }
+      ]
+    },
+    {
+      "name": "config",
+      "assertions": [
+        { "id": "c1", "check": "default_config.yaml is valid YAML" },
+        { "id": "c2", "check": "Config has all 8 dataset entries" },
+        { "id": "c3", "check": "Config has all 7 scoring gene sets" },
+        { "id": "c4", "check": "ConfigLoader loads and validates successfully" }
+      ]
+    },
+    {
+      "name": "cli",
+      "assertions": [
+        { "id": "cl1", "check": "main.py --help runs without error" },
+        { "id": "cl2", "check": "All 8 subcommands registered" }
+      ]
+    },
+    {
+      "name": "structure",
+      "assertions": [
+        { "id": "st1", "check": "All __init__.py files exist" },
+        { "id": "st2", "check": "README.md exists and has content" },
+        { "id": "st3", "check": "pyproject.toml has correct dependencies" },
+        { "id": "st4", "check": "data/ results/ directories exist" }
+      ]
+    }
+  ]
+}

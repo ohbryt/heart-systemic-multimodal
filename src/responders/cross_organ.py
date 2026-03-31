@@ -6,7 +6,11 @@ receptors expressed in responder tissues (brain, liver, muscle, etc.) using a
 CellPhoneDB/CellChat-style ligand-receptor approach.
 
 Output: lr_pairs.csv with columns:
-    ligand, receptor, source_tissue, target_tissue, score
+    ligand, receptor, source_tissue, target_tissue, score,
+    receptor_coverage, systemic_reach
+
+Additional outputs:
+    cross_organ_heatmap.png — ligands x organs heatmap coloured by receptor expression
 
 Usage
 -----
@@ -29,6 +33,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -306,18 +313,202 @@ class CrossOrganMapper:
         logger.info("Saved LR pairs (%d rows) to %s", len(df), out_path)
         return out_path
 
+    # ------------------------------------------------------------------
+    # Receptor coverage and systemic reach
+    # ------------------------------------------------------------------
+
+    def receptor_coverage_score(self, ligand: str) -> dict[str, float]:
+        """
+        Compute the fraction of loaded target tissues that express at least
+        one matched receptor above ``expr_threshold`` for a given ligand.
+
+        Parameters
+        ----------
+        ligand : str
+            Gene symbol of the cardiac-secreted ligand.
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping ``receptor -> coverage_fraction`` where coverage_fraction
+            is the proportion of target tissues in which that receptor is
+            expressed at or above ``expr_threshold``.
+        """
+        receptors = self.lr_db.get_receptors(ligand.upper())
+        if not receptors:
+            return {}
+
+        target_tissues = list(self._tissue_expression.keys())
+        n_tissues = len(target_tissues)
+        if n_tissues == 0:
+            # No expression data — coverage is undefined; return 1.0 (database-only)
+            return {r: 1.0 for r in receptors}
+
+        coverage: dict[str, float] = {}
+        for receptor in receptors:
+            expressed_in = sum(
+                1
+                for tissue in target_tissues
+                if float(
+                    self._tissue_expression[tissue].get(receptor, 0.0)
+                ) >= self.expr_threshold
+            )
+            coverage[receptor] = round(expressed_in / n_tissues, 4)
+        return coverage
+
+    def systemic_reach(self, ligand: str) -> int:
+        """
+        Count the number of distinct organs/tissues in which at least one
+        matched receptor for ``ligand`` is expressed above threshold.
+
+        Parameters
+        ----------
+        ligand : str
+
+        Returns
+        -------
+        int
+            Number of organs with confirmed receptor expression.
+        """
+        receptors = self.lr_db.get_receptors(ligand.upper())
+        if not receptors:
+            return 0
+
+        target_tissues = list(self._tissue_expression.keys())
+        if not target_tissues:
+            return 0
+
+        organs_with_receptor: set[str] = set()
+        for tissue in target_tissues:
+            expr = self._tissue_expression[tissue]
+            for receptor in receptors:
+                if float(expr.get(receptor, 0.0)) >= self.expr_threshold:
+                    organs_with_receptor.add(tissue)
+                    break  # one receptor sufficient to count the organ
+        return len(organs_with_receptor)
+
+    def plot_cross_organ_heatmap(
+        self,
+        df: pd.DataFrame,
+        save: bool = True,
+        filename: str = "cross_organ_heatmap.png",
+    ) -> plt.Figure:
+        """
+        Plot a heatmap of ligands x target_tissues coloured by mean receptor
+        expression in each tissue.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Output of ``run()`` with at least columns
+            ``ligand``, ``target_tissue``, ``score``.
+        save : bool
+            If True, saves the figure to ``output_dir / filename``.
+        filename : str
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        if df.empty:
+            logger.warning("Empty LR pairs DataFrame — skipping heatmap")
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, "No data", ha="center", va="center")
+            return fig
+
+        pivot = (
+            df.groupby(["ligand", "target_tissue"])["score"]
+            .mean()
+            .unstack(fill_value=0.0)
+        )
+
+        fig, ax = plt.subplots(
+            figsize=(max(6, len(pivot.columns) * 1.2), max(4, len(pivot.index) * 0.5))
+        )
+        try:
+            import seaborn as sns  # noqa: PLC0415
+            sns.heatmap(
+                pivot,
+                cmap="YlOrRd",
+                linewidths=0.4,
+                annot=pivot.shape[0] <= 20,
+                fmt=".2f",
+                ax=ax,
+                cbar_kws={"label": "Mean LR Score"},
+            )
+        except ImportError:
+            im = ax.imshow(pivot.values, aspect="auto", cmap="YlOrRd")
+            ax.set_xticks(range(len(pivot.columns)))
+            ax.set_xticklabels(pivot.columns, rotation=45, ha="right")
+            ax.set_yticks(range(len(pivot.index)))
+            ax.set_yticklabels(pivot.index)
+            fig.colorbar(im, ax=ax, label="Mean LR Score")
+
+        ax.set_title("Cross-Organ Receptor Heatmap (Ligands × Organs)")
+        ax.set_xlabel("Target Tissue")
+        ax.set_ylabel("Ligand")
+        plt.tight_layout()
+
+        if save:
+            out_path = self.output_dir / filename
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            logger.info("Cross-organ heatmap saved to %s", out_path)
+        plt.close(fig)
+        return fig
+
+    def _enrich_with_coverage(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add ``receptor_coverage`` and ``systemic_reach`` columns to an LR
+        pairs DataFrame.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Output of ``run()``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Same DataFrame with two additional columns.
+        """
+        if df.empty:
+            df["receptor_coverage"] = pd.Series(dtype=float)
+            df["systemic_reach"] = pd.Series(dtype=int)
+            return df
+
+        # Pre-compute per-ligand coverage dicts and reach values
+        ligands = df["ligand"].unique()
+        coverage_map: dict[str, dict[str, float]] = {
+            lig: self.receptor_coverage_score(lig) for lig in ligands
+        }
+        reach_map: dict[str, int] = {
+            lig: self.systemic_reach(lig) for lig in ligands
+        }
+
+        df = df.copy()
+        df["receptor_coverage"] = df.apply(
+            lambda row: coverage_map[row["ligand"]].get(row["receptor"], 0.0),
+            axis=1,
+        )
+        df["systemic_reach"] = df["ligand"].map(reach_map)
+        return df
+
     def run_and_save(
         self,
         source_tissue: str = "heart",
         filename: str = "lr_pairs.csv",
     ) -> tuple[pd.DataFrame, Path]:
         """
-        Convenience wrapper: run mapping and save result.
+        Convenience wrapper: run mapping, enrich with coverage metrics, and save.
+
+        The saved CSV includes ``receptor_coverage`` and ``systemic_reach``
+        columns in addition to the base LR pair columns.
 
         Returns
         -------
         tuple[pd.DataFrame, Path]
         """
         df = self.run(source_tissue=source_tissue)
+        df = self._enrich_with_coverage(df)
         path = self.save(df, filename=filename)
         return df, path

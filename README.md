@@ -2,21 +2,24 @@
 
 A modular, RAM-aware Python pipeline for integrating single-cell RNA-seq,
 bulk RNA-seq, and proteomics data to identify **cardiac secretome candidates**
-and **systemic cross-tissue responders** in heart failure.
+and **systemic cross-tissue responders** in heart failure and related cardiac
+diseases.
 
 ---
 
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
-2. [Datasets](#datasets)
-3. [Setup](#setup)
-4. [Configuration](#configuration)
-5. [Usage](#usage)
-6. [Manual Data Placement](#manual-data-placement)
-7. [Pipeline Steps](#pipeline-steps)
-8. [Output Structure](#output-structure)
-9. [Troubleshooting](#troubleshooting)
+2. [Architecture](#architecture)
+3. [HBAM Index](#hbam-index)
+4. [Datasets](#datasets)
+5. [Setup](#setup)
+6. [Configuration](#configuration)
+7. [Usage](#usage)
+8. [Manual Data Placement](#manual-data-placement)
+9. [Pipeline Steps](#pipeline-steps)
+10. [Output Structure](#output-structure)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -36,6 +39,137 @@ such as liver and skeletal muscle.  This pipeline:
 5. Identifies systemic responder cell populations correlated with cardiac
    disease severity.
 6. Ranks candidates by a composite score weighting multiple evidence layers.
+7. Computes the **HBAM index** — a machine-learning score quantifying each
+   protein's capacity as a heart-to-body signalling mediator.
+8. Compares secretome landscape across multiple disease states (HCM, DCM, ICM).
+
+---
+
+## Architecture
+
+```
+heart_systemic_multimodal_project/
+│
+├── main.py                        CLI entry point (click)
+├── config/
+│   └── default_config.yaml        All default settings
+│
+├── src/
+│   ├── downloaders/               GEO / PRIDE / CELLxGENE downloaders
+│   ├── preprocessing/             scRNA-seq QC, normalisation, embedding
+│   │   ├── heart_sc.py
+│   │   └── proteomics.py
+│   ├── scoring/                   Gene program and HBAM scoring
+│   │   ├── differential.py        Pseudo-bulk DE analysis
+│   │   ├── phenotype_scorer.py    scanpy.tl.score_genes wrapper
+│   │   └── hbam_index.py          HBAM index computation + ML training
+│   ├── secretome/
+│   │   └── secretome_inference.py Signal peptide + expression filtering
+│   ├── overlap/
+│   │   └── plasma_overlap.py      Plasma proteomics / EV overlap
+│   ├── responders/
+│   │   ├── cross_organ.py         Cross-organ responder identification
+│   │   └── lr_database.py         Ligand-receptor database
+│   ├── ranking/
+│   │   └── biomarker_ranker.py    Composite score ranking
+│   ├── reporting/
+│   │   ├── report_generator.py    Structured Markdown report
+│   │   └── figure_generator.py    Publication figures (300 DPI, PDF+PNG)
+│   └── utils/
+│       ├── config_loader.py
+│       ├── logger.py
+│       └── memory.py
+│
+├── results/                       Pipeline outputs (auto-created)
+│   ├── figures/
+│   ├── tables/
+│   ├── reports/
+│   ├── models/
+│   └── logs/
+│
+└── data/                          Input data (manual placement or auto-download)
+    ├── raw/
+    ├── processed/
+    ├── cache/
+    └── reference/
+```
+
+**Data flow:**
+
+```
+raw data
+   |
+   v
+[download] --> data/raw/
+   |
+   v
+[preprocess] --> data/processed/*.h5ad
+   |
+   v
+[score] --> .obs phenotype scores
+   |
+   v
+[secretome] --> tables/secretome_candidates.tsv
+   |
+   v
+[overlap] --> tables/cross_tissue_overlap.tsv
+   |
+   v
+[responders] --> tables/systemic_responders.tsv
+   |
+   v
+[rank] --> tables/ranked_candidates.tsv
+   |
+   v
+[hbam] --> tables/hbam_scores.tsv
+   |
+   v
+[report] --> reports/final_report.md + figures/
+```
+
+---
+
+## HBAM Index
+
+The **Heart-to-Body Axis Modulator (HBAM) index** is a composite score
+quantifying each cardiac-secreted protein's systemic signalling capacity.
+
+### Formula
+
+```
+HBAM = 0.25 x cardiac_specificity
+     + 0.20 x secretome_probability
+     + 0.20 x plasma_detection_rate
+     + 0.20 x receptor_coverage_score
+     + 0.15 x disease_de_score
+```
+
+All sub-scores are normalised to [0, 1].  The final HBAM score is also
+normalised to [0, 1].  Candidates with **HBAM >= 0.80** (top decile) are
+classified as high-priority systemic mediators.
+
+### ML Backing
+
+The weighting is learnt by a **gradient-boosted ensemble (XGBoost)** trained
+on labelled protein sets with known systemic effects.  Cross-validation
+(default 5-fold) tunes hyperparameters.  **SHAP values** are computed to
+explain model decisions and visualised as a feature importance bar chart.
+
+### Commands
+
+```bash
+# Compute HBAM scores for all candidates
+hsm hbam
+
+# Filter to specific disease groups
+hsm hbam --disease HCM --disease DCM
+
+# Train / retrain the ML model
+hsm train-hbam --cv-folds 10
+
+# Train on subset of diseases
+hsm train-hbam --disease HCM --disease ICM
+```
 
 ---
 
@@ -49,6 +183,8 @@ such as liver and skeletal muscle.  This pipeline:
 | `heart_failure_GSE183852` | GSE183852 | Human HF snRNA-seq (DCM/ICM vs healthy) |
 | `cardiac_fibrosis_GSE135805` | GSE135805 | Human cardiac fibrosis scRNA-seq |
 | `heart_aging_GSE290577` | GSE290577 | Human aging heart scRNA-seq |
+| `hcm_GSE141910` | GSE141910 | Hypertrophic cardiomyopathy (HCM) snRNA-seq |
+| `dcm_GSE120895` | GSE120895 | Dilated cardiomyopathy (DCM) snRNA-seq |
 
 ### Proteomics (PRIDE Archive)
 
@@ -57,6 +193,7 @@ such as liver and skeletal muscle.  This pipeline:
 | `heart_proteomics_PXD021371` | PXD021371 | Heart failure plasma/tissue proteomics |
 | `secretome_PXD059929` | PXD059929 | Cardiac secretome (conditioned media) |
 | `cross_tissue_PXD060680` | PXD060680 | Cross-tissue proteomics (heart/liver/muscle) |
+| `hcm_proteomics_PXD_HCM` | PXD_HCM | HCM-specific plasma proteomics |
 
 ### Bulk RNA-seq
 
@@ -100,6 +237,9 @@ pip install -e .
 # Optional: install CELLxGENE Census support
 pip install -e ".[census]"
 
+# Optional: install HBAM ML dependencies (xgboost, shap)
+pip install -e ".[ml]"
+
 # Optional: install everything including dev tools
 pip install -e ".[full]"
 ```
@@ -136,6 +276,11 @@ preprocessing:
   downsample_to: 100000    # override to 100k cells
   n_top_genes: 4000
 
+analysis:
+  hbam:
+    cv_folds: 10
+    disease_filter: [HCM, DCM, ICM]
+
 execution:
   n_workers: 8
   log_level: DEBUG
@@ -156,6 +301,8 @@ hsm preprocess --config my_config.yaml
 | `preprocessing` | `downsample_to` | 50000 | Max cells per dataset (null = off) |
 | `preprocessing` | `max_mito_fraction` | 0.20 | QC: max MT gene fraction |
 | `analysis.ranking` | `top_n` | 20 | Top candidates per category |
+| `analysis.hbam` | `cv_folds` | 5 | Cross-validation folds for HBAM training |
+| `analysis.hbam` | `disease_filter` | null | List of diseases to include (null = all) |
 | `execution` | `n_workers` | 4 | Parallel workers |
 | `execution` | `use_cache` | true | Cache intermediate results |
 
@@ -166,11 +313,14 @@ hsm preprocess --config my_config.yaml
 ### Full pipeline (recommended first run)
 
 ```bash
-# Download all enabled datasets, then run full pipeline
+# Download all enabled datasets, then run full pipeline (includes hbam)
 hsm run-all --config my_config.yaml
 
 # Dry-run to preview without executing
 hsm run-all --dry-run
+
+# Skip hbam training step (use precomputed scores)
+hsm run-all --skip hbam
 ```
 
 ### Individual commands
@@ -187,6 +337,7 @@ hsm preprocess --dataset heart_cellxgene --force       # re-run with force
 # 3. Score gene programs
 hsm score
 hsm score --program fibrosis --program hypertrophy     # specific programs
+hsm score --dataset heart_failure_GSE183852            # specific dataset
 
 # 4. Secretome analysis
 hsm secretome
@@ -201,8 +352,17 @@ hsm responders --min-correlation 0.4
 
 # 7. Rank candidates
 hsm rank --top-n 30 --output-format xlsx
+hsm rank --disease HCM --disease DCM                   # disease-filtered ranking
 
-# 8. Generate report
+# 8. Compute HBAM index
+hsm hbam
+hsm hbam --disease HCM --disease DCM --output-format xlsx
+
+# 9. Train HBAM ML model
+hsm train-hbam
+hsm train-hbam --cv-folds 10 --disease HCM --disease DCM --disease ICM
+
+# 10. Generate report
 hsm report --format html --open
 ```
 
@@ -212,15 +372,18 @@ hsm report --format html --open
 # Skip download and preprocess, start from scoring
 hsm run-all --start-from score --config my_config.yaml
 
-# Skip the report step
-hsm run-all --skip report
+# Start from hbam (skip all earlier steps)
+hsm run-all --start-from hbam
+
+# Skip the hbam and report steps
+hsm run-all --skip hbam --skip report
 ```
 
 ### Verbose / debug mode
 
 ```bash
 hsm preprocess --verbose
-hsm score --verbose --dataset heart_cellxgene
+hsm hbam --verbose --disease DCM
 ```
 
 ---
@@ -243,8 +406,12 @@ data/raw/
 │   └── GSE183852_metadata.csv
 ├── GSE135805/
 │   └── (same structure)
-└── GSE290577/
-    └── (same structure)
+├── GSE290577/
+│   └── (same structure)
+├── GSE141910/
+│   └── (HCM dataset)
+└── GSE120895/
+    └── (DCM dataset)
 ```
 
 The pipeline auto-detects whether files are in 10x MTX format or h5ad.
@@ -277,6 +444,18 @@ data/raw/E-MTAB-15659/
 ├── counts_matrix.tsv     (genes x samples, tab-separated)
 └── sample_metadata.tsv   (sample annotations)
 ```
+
+### HBAM Training Data
+
+To train the HBAM model on custom labelled data, place a TSV at:
+
+```
+results/tables/hbam_training_data.tsv
+```
+
+Required columns: `gene`, `label` (1=confirmed systemic mediator, 0=negative),
+plus the five feature columns: `cardiac_specificity`, `secretome_probability`,
+`plasma_detection_rate`, `receptor_coverage_score`, `disease_de_score`.
 
 ### CELLxGENE Census (auto-download)
 
@@ -340,6 +519,7 @@ For proteomics:
 - Calls `scanpy.tl.score_genes()` for each program in `config.scoring`.
 - Adds score as `.obs["{program}_score"]` to each processed AnnData.
 - Generates score distribution plots per cell type.
+- Supports `--dataset` filter.
 
 ### 4. `secretome`
 
@@ -363,15 +543,40 @@ For proteomics:
 
 ### 7. `rank`
 
-- Aggregates evidence from steps 3–6.
+- Aggregates evidence from steps 3-6.
 - Computes composite score per candidate gene/protein.
 - Applies configurable weights (scrna, proteomics, LR, cross-tissue, literature).
+- Supports `--disease` filter to restrict ranking to specific disease groups.
 - Outputs ranked table with all sub-scores.
 
-### 8. `report`
+### 8. `hbam`
+
+- Loads ranked candidates and computes the HBAM index.
+- Integrates five evidence layers into a single [0, 1] score.
+- Supports `--disease` filter to score within specific disease groups.
+- Outputs `hbam_scores.tsv` with rank, score, percentile, and disease group.
+
+### 9. `train-hbam`
+
+- Trains a gradient-boosted XGBoost model on labelled training data.
+- Performs k-fold cross-validation to tune hyperparameters.
+- Computes SHAP feature importances.
+- Saves trained model to `results/models/hbam_model.pkl`.
+- Supports `--disease` filter and `--cv-folds` configuration.
+
+### 10. `report`
 
 - Collects all figures and tables from `results/`.
-- Renders an HTML report with Plotly interactive figures.
+- Renders a structured Markdown report with:
+  - Executive Summary
+  - Disease Landscape (multi-disease comparison)
+  - Secretome Analysis
+  - Plasma Integration
+  - Cross-Organ Network
+  - HBAM Index section with distribution statistics
+  - Methods
+  - Data Manifest (SHA-256 checksums)
+  - Figure Catalog (LaTeX-compatible references)
 - Optionally exports to PDF or Jupyter Notebook.
 
 ---
@@ -381,19 +586,30 @@ For proteomics:
 ```
 results/
 ├── logs/
-│   └── 20240101_120000_pipeline.log
+│   ├── 20240101_120000_pipeline.log
+│   └── report_summary.log
 ├── figures/
-│   ├── umap_heart_cellxgene.html
-│   ├── fibrosis_score_violin.html
-│   ├── secretome_heatmap.html
-│   └── cross_tissue_overlap.html
+│   ├── umap_phenotype_scores.{pdf,png}
+│   ├── phenotype_heatmap.{pdf,png}
+│   ├── venn_secretome_plasma.{pdf,png}
+│   ├── sankey_lr_axes.{html,pdf,png}
+│   ├── top20_biomarkers_bar.{pdf,png}
+│   ├── cross_organ_heatmap.{pdf,png}
+│   ├── hbam_distribution.{pdf,png}
+│   ├── shap_feature_importance.{pdf,png}
+│   ├── network_graph_heart_organs.{pdf,png}
+│   └── disease_radar_chart.{pdf,png}
 ├── tables/
 │   ├── secretome_candidates.tsv
 │   ├── cross_tissue_overlap.tsv
 │   ├── systemic_responders.tsv
-│   └── ranked_candidates.tsv
-├── report/
-│   └── analysis_report.html
+│   ├── ranked_candidates.tsv
+│   ├── hbam_scores.tsv
+│   └── hbam_shap.tsv
+├── models/
+│   └── hbam_model.pkl
+├── reports/
+│   └── final_report.md
 └── pipeline_status.json
 
 data/
@@ -421,6 +637,21 @@ Or run with lower `n_top_genes`:
 ```yaml
 preprocessing:
   n_top_genes: 2000
+```
+
+### HBAM training fails
+
+Ensure the training data file exists:
+
+```
+results/tables/hbam_training_data.tsv
+```
+
+Install optional ML dependencies:
+
+```bash
+pip install -e ".[ml]"
+# installs: xgboost, shap, scikit-learn
 ```
 
 ### CELLxGENE Census not found

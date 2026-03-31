@@ -1,0 +1,261 @@
+# Heart-Systemic Multi-modal Analysis Pipeline — Dataset Registry
+# Fields: id, type, category, disease, modality, enabled, priority, url, notes
+# priority: 1 (highest) → 5 (lowest)
+# category: heart_sc | heart_spatial | secretome | plasma_ev | responder
+
+datasets:
+
+  # ---------------------------------------------------------------------------
+  # HEART SC/SN — Single-cell / Single-nucleus RNA-seq
+  # ---------------------------------------------------------------------------
+
+  - id: GSE183852
+    type: geo
+    category: heart_sc
+    disease: heart_failure
+    modality: snRNA-seq
+    enabled: true
+    priority: 1
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE183852&format=file"
+    notes: >
+      Human heart failure snRNA-seq — DCM/ICM vs healthy controls.
+      ~40k nuclei from left ventricle. Reference for HF cell-type composition.
+
+  - id: GSE181764
+    type: geo
+    category: heart_sc
+    disease: hypertrophic_cardiomyopathy
+    modality: snRNA-seq
+    enabled: true
+    priority: 1
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE181764&format=file"
+    notes: >
+      Human HCM snRNA-seq. High-quality nuclei from sarcomere-mutation HCM
+      patients vs controls. Key for hypertrophy gene programs.
+
+  - id: GSE155514
+    type: geo
+    category: heart_sc
+    disease: cardiac_hypertrophy
+    modality: scRNA-seq
+    enabled: true
+    priority: 2
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE155514&format=file"
+    notes: >
+      Mouse cardiac hypertrophy model scRNA-seq (TAC + AngII).
+      Useful for cross-species fibroblast / cardiomyocyte pathway validation.
+
+  - id: GSE109816
+    type: geo
+    category: heart_sc
+    disease: normal
+    modality: scRNA-seq
+    enabled: true
+    priority: 2
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE109816&format=file"
+    notes: >
+      Human cardiac cell atlas — early single-cell reference from Tucker et al.
+      Covers major cardiac cell types in healthy adult myocardium.
+
+  - id: cellxgene_failing_heart
+    type: cellxgene
+    category: heart_sc
+    disease: heart_failure
+    modality: scRNA-seq
+    enabled: true
+    priority: 1
+    url: "https://cellxgene.cziscience.com/collections/283d65eb-dd53-496d-adb7-7570c7caa443"
+    notes: >
+      CELLxGENE Census — failing heart collection. Large, harmonized dataset
+      covering DCM, ICM, HCM across multiple cohorts. Use Census API for access.
+
+  # ---------------------------------------------------------------------------
+  # HEART SPATIAL — Spatial transcriptomics
+  # ---------------------------------------------------------------------------
+
+  - id: GSE135805
+    type: geo
+    category: heart_spatial
+    disease: cardiac_fibrosis
+    modality: spatial_transcriptomics
+    enabled: true
+    priority: 2
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE135805&format=file"
+    notes: >
+      Human cardiac fibrosis spatial transcriptomics. Fibroblast heterogeneity
+      and ECM remodeling zones. Compatible with Seurat/Squidpy spatial pipeline.
+
+  - id: GSE290577
+    type: geo
+    category: heart_spatial
+    disease: aging
+    modality: spatial_transcriptomics
+    enabled: true
+    priority: 2
+    url: "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE290577&format=file"
+    notes: >
+      Human aging heart spatial transcriptomics — age-related transcriptional
+      drift and regional remodeling. Complement to snRNA-seq aging datasets.
+
+  - id: visium_heart_placeholder
+    type: local
+    category: heart_spatial
+    disease: heart_failure
+    modality: visium
+    enabled: false
+    priority: 3
+    url: ""
+    notes: >
+      PLACEHOLDER — 10x Visium heart section. Set enabled: true and provide
+      local_path once data is available. Expected: filtered_feature_bc_matrix/
+      + spatial/ subdirectory layout.
+
+  # ---------------------------------------------------------------------------
+  # SECRETOME — Cardiac secretome proteomics
+  # ---------------------------------------------------------------------------
+
+  - id: cardiac_fibroblast_secretome_atlas
+    type: local
+    category: secretome
+    disease: cardiac_fibrosis
+    modality: proteomics_secretome
+    enabled: false
+    priority: 2
+    url: ""
+    notes: >
+      PLACEHOLDER — cardiac fibroblast secretome atlas from conditioned media
+      LC-MS/MS. Expected columns: Protein, Gene, Intensity, Sample, Condition.
+      Set local_path and enabled: true when data is available.
+
+  - id: cardiomyocyte_conditioned_media_proteome
+    type: local
+    category: secretome
+    disease: heart_failure
+    modality: proteomics_secretome
+    enabled: false
+    priority: 2
+    url: ""
+    notes: >
+      PLACEHOLDER — cardiomyocyte conditioned media proteome (iPSC-CM or
+      primary). Captures cardiokine / paracrine output. Pair with scRNA-seq
+      secretory gene scores for cross-validation.
+
+  - id: fibroblast_paracrine_proteome
+    type: local
+    category: secretome
+    disease: cardiac_fibrosis
+    modality: proteomics_secretome
+    enabled: false
+    priority: 3
+    url: ""
+    notes: >
+      PLACEHOLDER — cardiac fibroblast paracrine proteome from co-culture
+      or conditioned media. Overlap with EV cargo for ECM/TGF-b network.
+
+  # ---------------------------------------------------------------------------
+  # PLASMA / EV — Plasma proteomics and extracellular vesicle cargo
+  # ---------------------------------------------------------------------------
+
+  - id: PXD021371
+    type: pride
+    category: plasma_ev
+    disease: heart_failure
+    modality: plasma_proteomics
+    enabled: true
+    priority: 1
+    url: "https://www.ebi.ac.uk/pride/archive/projects/PXD021371"
+    notes: >
+      Human heart failure plasma / tissue proteomics (PRIDE PXD021371).
+      Key biomarker discovery dataset for circulating protein candidates.
+
+  - id: PXD059929
+    type: pride
+    category: plasma_ev
+    disease: cardiac_secretome
+    modality: ev_proteomics
+    enabled: true
+    priority: 1
+    url: "https://www.ebi.ac.uk/pride/archive/projects/PXD059929"
+    notes: >
+      Cardiac secretome — conditioned media proteomics from PRIDE.
+      Complements local secretome placeholders with published reference.
+
+  - id: PXD060680
+    type: pride
+    category: plasma_ev
+    disease: multi_tissue
+    modality: proteomics_cross_tissue
+    enabled: true
+    priority: 2
+    url: "https://www.ebi.ac.uk/pride/archive/projects/PXD060680"
+    notes: >
+      Cross-tissue proteomics — simultaneous heart/liver/muscle co-profiling.
+      Critical for identifying tissue-specific vs shared secreted proteins.
+
+  - id: human_plasma_proteome_reference
+    type: local
+    category: plasma_ev
+    disease: normal
+    modality: plasma_proteomics
+    enabled: false
+    priority: 3
+    url: "https://hupo.org/human-plasma-proteome"
+    notes: >
+      PLACEHOLDER — Human Plasma Proteome Project (HUPO) reference set.
+      Use as background/negative control for cardiac-specific enrichment.
+      Download manually from HUPO or use local precomputed gene list.
+
+  # ---------------------------------------------------------------------------
+  # RESPONDER — Systemic tissue single-cell references
+  # ---------------------------------------------------------------------------
+
+  - id: E-MTAB-15659
+    type: arrayexpress
+    category: responder
+    disease: normal
+    modality: bulk_rnaseq
+    enabled: true
+    priority: 2
+    url: "https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-15659"
+    notes: >
+      Cross-tissue bulk RNA-seq from ArrayExpress — includes brain, liver,
+      muscle, adipose. Used to identify systemic gene expression correlates
+      of cardiac secreted factors.
+
+  - id: liver_sc_reference
+    type: local
+    category: responder
+    disease: normal
+    modality: scRNA-seq
+    enabled: false
+    priority: 3
+    url: ""
+    notes: >
+      PLACEHOLDER — liver snRNA-seq reference (e.g., HumanCellAtlas liver or
+      custom cohort). Set enabled: true and provide local_path. Expected: .h5ad
+      with obs['cell_type'] annotation.
+
+  - id: muscle_sc_reference
+    type: local
+    category: responder
+    disease: normal
+    modality: scRNA-seq
+    enabled: false
+    priority: 3
+    url: ""
+    notes: >
+      PLACEHOLDER — skeletal muscle snRNA-seq reference. Key responder tissue
+      for cardiac cachexia and cross-tissue signaling. Expected: .h5ad.
+
+  - id: adipose_sc_reference
+    type: local
+    category: responder
+    disease: normal
+    modality: scRNA-seq
+    enabled: false
+    priority: 3
+    url: ""
+    notes: >
+      PLACEHOLDER — adipose tissue scRNA-seq reference (subcutaneous or
+      visceral). Relevant for metabolic cross-talk with failing heart.
+      Expected: .h5ad with cell_type annotation.

@@ -13,8 +13,10 @@ Commands:
     overlap      Cross-tissue overlap analysis (heart vs liver/muscle/etc.).
     responders   Identify systemic tissue responders to cardiac signals.
     rank         Rank and prioritize secretome candidates.
+    hbam         Compute the Heart-to-Body Axis Modulator (HBAM) index.
+    train-hbam   Train the ML model backing the HBAM index.
     report       Generate HTML / PDF analysis report.
-    run-all      Execute the full pipeline end-to-end.
+    run-all      Execute the full pipeline end-to-end (includes hbam step).
 """
 
 from __future__ import annotations
@@ -527,12 +529,20 @@ def cmd_responders(
     show_default=True,
     help="Output file format.",
 )
+@click.option(
+    "--disease",
+    "-d",
+    "diseases",
+    multiple=True,
+    help="Filter ranking to specific disease group(s) (e.g. HCM, DCM, ICM). Default: all.",
+)
 def cmd_rank(
     config_path: Optional[Path],
     verbose: bool,
     dry_run: bool,
     top_n: Optional[int],
     output_format: str,
+    diseases: tuple[str, ...],
 ) -> None:
     """Rank and prioritize secretome candidates using a composite score.
 
@@ -561,10 +571,17 @@ def cmd_rank(
     rank_cfg = cfg.config.get("analysis", {}).get("ranking", {})
     if top_n is not None:
         rank_cfg["top_n"] = top_n
+    if diseases:
+        rank_cfg["disease_filter"] = list(diseases)
     effective_top_n = rank_cfg.get("top_n", 20)
 
     ranker = CandidateRanker(config=cfg.config, dry_run=dry_run)
     ranked = ranker.run()
+
+    # Apply disease filter post-hoc if column is present
+    if diseases and "disease" in ranked.columns:
+        ranked = ranked[ranked["disease"].isin(diseases)]
+        logger.info("Disease filter applied: %s (%d rows remain)", list(diseases), len(ranked))
 
     suffix = output_format.lower()
     out_path = Path(cfg.get_path("tables_dir")) / f"ranked_candidates.{suffix}"
@@ -581,6 +598,169 @@ def cmd_rank(
         )
     else:
         logger.info("[dry-run] Would save %d ranked candidates to %s", len(ranked), out_path)
+
+
+# ---------------------------------------------------------------------------
+# hbam
+# ---------------------------------------------------------------------------
+
+@cli.command("hbam")
+@_CONFIG_OPTION
+@_VERBOSE_OPTION
+@_DRY_RUN_OPTION
+@click.option(
+    "--disease",
+    "-d",
+    "diseases",
+    multiple=True,
+    help="Disease group(s) to include (e.g. HCM, DCM, ICM). Default: all.",
+)
+@click.option(
+    "--output-format",
+    type=click.Choice(["tsv", "csv", "xlsx"], case_sensitive=False),
+    default="tsv",
+    show_default=True,
+    help="Output file format.",
+)
+def cmd_hbam(
+    config_path: Optional[Path],
+    verbose: bool,
+    dry_run: bool,
+    diseases: tuple[str, ...],
+    output_format: str,
+) -> None:
+    """Compute the Heart-to-Body Axis Modulator (HBAM) index.
+
+    The HBAM index integrates five evidence layers into a single composite
+    score per candidate gene/protein:
+      - Cardiac expression specificity
+      - Secretome probability
+      - Plasma detection rate
+      - Cross-organ receptor coverage score
+      - Disease differential expression score
+
+    Requires ranked_candidates.tsv and secretome_candidates.tsv from
+    previous pipeline steps.
+
+    Output: results/tables/hbam_scores.{tsv|csv|xlsx}
+
+    Examples:
+
+        hsm hbam
+
+        hsm hbam --disease HCM --disease DCM
+
+        hsm hbam --output-format xlsx
+    """
+    cfg, _ = _init(config_path, verbose)
+    log_section("HBAM")
+
+    from src.scoring.hbam_index import HBAMScorer
+
+    hbam_cfg = cfg.config.get("analysis", {}).get("hbam", {})
+    if diseases:
+        hbam_cfg["disease_filter"] = list(diseases)
+
+    scorer = HBAMScorer(config=hbam_cfg, dry_run=dry_run)
+    results = scorer.run()
+
+    suffix = output_format.lower()
+    out_path = Path(cfg.get_path("tables_dir")) / f"hbam_scores.{suffix}"
+
+    if not dry_run:
+        if suffix == "xlsx":
+            results.to_excel(out_path, index=False)
+        elif suffix == "csv":
+            results.to_csv(out_path, index=False)
+        else:
+            results.to_csv(out_path, sep="\t", index=False)
+        logger.info("HBAM scores saved: %s (%d rows)", out_path, len(results))
+    else:
+        logger.info("[dry-run] Would save %d HBAM scores to %s", len(results), out_path)
+
+
+# ---------------------------------------------------------------------------
+# train-hbam
+# ---------------------------------------------------------------------------
+
+@cli.command("train-hbam")
+@_CONFIG_OPTION
+@_VERBOSE_OPTION
+@_DRY_RUN_OPTION
+@click.option(
+    "--disease",
+    "-d",
+    "diseases",
+    multiple=True,
+    help="Disease group(s) to include in training (e.g. HCM, DCM, ICM). Default: all.",
+)
+@click.option(
+    "--cv-folds",
+    default=5,
+    type=int,
+    show_default=True,
+    help="Number of cross-validation folds for hyperparameter tuning.",
+)
+@click.option(
+    "--model-output",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Path to save the trained model (default: results/models/hbam_model.pkl).",
+)
+def cmd_train_hbam(
+    config_path: Optional[Path],
+    verbose: bool,
+    dry_run: bool,
+    diseases: tuple[str, ...],
+    cv_folds: int,
+    model_output: Optional[Path],
+) -> None:
+    """Train the ML model backing the HBAM index.
+
+    Trains a gradient-boosted ensemble (XGBoost) using the five HBAM
+    feature layers.  Cross-validation is used to tune hyperparameters
+    and SHAP values are computed for interpretability.
+
+    Requires labelled training data in results/tables/hbam_training_data.tsv
+    (or path specified in config analysis.hbam.training_data_path).
+
+    Output:
+      - results/models/hbam_model.pkl   (trained model)
+      - results/tables/hbam_shap.tsv    (SHAP feature importances)
+      - results/figures/shap_feature_importance.{pdf,png}
+
+    Examples:
+
+        hsm train-hbam
+
+        hsm train-hbam --cv-folds 10 --disease HCM --disease DCM
+
+        hsm train-hbam --model-output /path/to/model.pkl
+    """
+    cfg, _ = _init(config_path, verbose)
+    log_section("TRAIN-HBAM")
+
+    from src.scoring.hbam_index import HBAMTrainer
+
+    hbam_cfg = cfg.config.get("analysis", {}).get("hbam", {})
+    if diseases:
+        hbam_cfg["disease_filter"] = list(diseases)
+    hbam_cfg["cv_folds"] = cv_folds
+
+    default_model_out = Path(cfg.get_path("results_dir")) / "models" / "hbam_model.pkl"
+    model_path = model_output or default_model_out
+
+    trainer = HBAMTrainer(config=hbam_cfg, dry_run=dry_run)
+    result = trainer.train(model_output_path=model_path)
+
+    if not dry_run:
+        logger.info(
+            "HBAM model trained: CV score=%.4f, saved to %s",
+            result.get("cv_score", float("nan")),
+            model_path,
+        )
+    else:
+        logger.info("[dry-run] Would train HBAM model and save to %s", model_path)
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +835,7 @@ def cmd_report(
     "skip_steps",
     multiple=True,
     type=click.Choice(
-        ["download", "preprocess", "score", "secretome", "overlap", "responders", "rank", "report"],
+        ["download", "preprocess", "score", "secretome", "overlap", "responders", "rank", "hbam", "report"],
         case_sensitive=False,
     ),
     help="Step(s) to skip. Repeat for multiple.",
@@ -665,7 +845,7 @@ def cmd_report(
     "start_from",
     default=None,
     type=click.Choice(
-        ["download", "preprocess", "score", "secretome", "overlap", "responders", "rank", "report"],
+        ["download", "preprocess", "score", "secretome", "overlap", "responders", "rank", "hbam", "report"],
         case_sensitive=False,
     ),
     help="Resume pipeline from this step (skips earlier steps).",
@@ -681,7 +861,7 @@ def cmd_run_all(
 
     Runs all steps in order:
       download -> preprocess -> score -> secretome -> overlap ->
-      responders -> rank -> report
+      responders -> rank -> hbam -> report
 
     Use --skip to omit individual steps, or --start-from to resume
     from a checkpoint.
@@ -694,7 +874,7 @@ def cmd_run_all(
 
         hsm run-all --start-from score --config my_config.yaml
 
-        hsm run-all --dry-run
+        hsm run-all --skip hbam --dry-run
     """
     cfg, _ = _init(config_path, verbose)
     log_section("RUN-ALL")
@@ -707,6 +887,7 @@ def cmd_run_all(
         "overlap",
         "responders",
         "rank",
+        "hbam",
         "report",
     ]
 
@@ -730,6 +911,7 @@ def cmd_run_all(
         "overlap": cmd_overlap,
         "responders": cmd_responders,
         "rank": cmd_rank,
+        "hbam": cmd_hbam,
         "report": cmd_report,
     }
 
