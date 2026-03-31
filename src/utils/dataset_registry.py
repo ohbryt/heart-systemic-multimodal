@@ -245,3 +245,10 @@ class DatasetRegistry:
             f"DatasetRegistry(total={s['total']}, enabled={s['enabled']}, "
             f"categories={list(s['by_category'].keys())})"
         )
+
+    def get_cellxgene_datasets(self) -> list[dict[str, Any]]:
+        """Return enabled datasets with type == 'cellxgene'."""
+        return [
+            d for d in self._datasets
+            if d.get("type") == "cellxgene" and d.get("enabled", True)
+        ]

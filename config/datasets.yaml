@@ -259,3 +259,22 @@ datasets:
       PLACEHOLDER — adipose tissue scRNA-seq reference (subcutaneous or
       visceral). Relevant for metabolic cross-talk with failing heart.
       Expected: .h5ad with cell_type annotation.
+
+  - id: cellxgene_failing_heart_slice
+    type: cellxgene
+    mode: census_slice
+    category: heart_sc
+    disease: HF
+    modality: snRNA-seq
+    enabled: true
+    priority: 1
+    url: "https://cellxgene.cziscience.com/collections/e75342a8-0f3b-4ec5-8ee1-245a23e0f7cb"
+    organism: "Homo sapiens"
+    tissue_general: "heart"
+    primary_only: true
+    assay: null
+    max_cells: 50000
+    random_state: 42
+    measurement_name: "RNA"
+    output_filename: "cellxgene_heart_primary.h5ad"
+    notes: "Fetched via Census slice (no API key required)"
