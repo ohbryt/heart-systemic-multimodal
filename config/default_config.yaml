@@ -1,0 +1,414 @@
+# Heart-Systemic Multi-modal Analysis Pipeline — Default Configuration
+# All paths are relative to the project root unless prefixed with /
+# Override by passing --config <user_config.yaml> to any CLI command
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  data_dir: data/raw
+  processed_dir: data/processed
+  results_dir: results
+  cache_dir: data/cache
+  logs_dir: results/logs
+  figures_dir: results/figures
+  tables_dir: results/tables
+  # Path to LR interaction database (e.g., CellChat, NicheNet, or custom TSV)
+  # Columns expected: ligand, receptor, source, weight (optional)
+  ligand_receptor_db: data/reference/lr_database.tsv
+
+# ---------------------------------------------------------------------------
+# Datasets
+# ---------------------------------------------------------------------------
+datasets:
+  # ── Single-cell / Single-nucleus RNA-seq ─────────────────────────────────
+
+  heart_cellxgene:
+    type: scrna
+    source: cellxgene_census
+    # CELLxGENE Census collection ID for heart tissue
+    collection_id: "283d65eb-dd53-496d-adb7-7570c7caa443"
+    tissue_filter: ["heart", "heart left ventricle", "heart right ventricle"]
+    disease_filter: ["normal", "dilated cardiomyopathy", "hypertrophic cardiomyopathy",
+                     "heart failure", "ischemic cardiomyopathy"]
+    # Set to null to disable census download and use local file instead
+    local_fallback: data/raw/heart_cellxgene.h5ad
+    enabled: true
+
+  heart_failure_GSE183852:
+    type: scrna
+    source: geo
+    accession: GSE183852
+    description: "Human heart failure snRNA-seq — DCM/ICM vs healthy"
+    local_path: data/raw/GSE183852
+    url_template: "https://www.ncbi.nlm.nih.gov/geo/download/?acc={accession}&format=file"
+    enabled: true
+
+  cardiac_fibrosis_GSE135805:
+    type: scrna
+    source: geo
+    accession: GSE135805
+    description: "Human cardiac fibrosis scRNA-seq — fibroblast heterogeneity"
+    local_path: data/raw/GSE135805
+    url_template: "https://www.ncbi.nlm.nih.gov/geo/download/?acc={accession}&format=file"
+    enabled: true
+
+  heart_aging_GSE290577:
+    type: scrna
+    source: geo
+    accession: GSE290577
+    description: "Human aging heart scRNA-seq — age-related transcriptional drift"
+    local_path: data/raw/GSE290577
+    url_template: "https://www.ncbi.nlm.nih.gov/geo/download/?acc={accession}&format=file"
+    enabled: true
+
+  # ── Proteomics (PRIDE/PXD) ───────────────────────────────────────────────
+
+  heart_proteomics_PXD021371:
+    type: proteomics
+    source: pride
+    accession: PXD021371
+    description: "Human heart failure plasma/tissue proteomics"
+    local_path: data/raw/PXD021371
+    file_pattern: "*.txt"
+    sample_column: "Sample"
+    protein_column: "Protein"
+    intensity_column: "Intensity"
+    enabled: true
+
+  secretome_PXD059929:
+    type: proteomics
+    source: pride
+    accession: PXD059929
+    description: "Cardiac secretome — conditioned media proteomics"
+    local_path: data/raw/PXD059929
+    file_pattern: "*.txt"
+    sample_column: "Sample"
+    protein_column: "Protein"
+    intensity_column: "Intensity"
+    enabled: true
+
+  cross_tissue_PXD060680:
+    type: proteomics
+    source: pride
+    accession: PXD060680
+    description: "Cross-tissue proteomics — heart/liver/muscle co-profiling"
+    local_path: data/raw/PXD060680
+    file_pattern: "*.txt"
+    sample_column: "Sample"
+    protein_column: "Protein"
+    intensity_column: "Intensity"
+    enabled: true
+
+  # ── Bulk RNA-seq ──────────────────────────────────────────────────────────
+
+  emtab_15659:
+    type: bulk_rnaseq
+    source: arrayexpress
+    accession: E-MTAB-15659
+    description: "Cross-tissue bulk RNA-seq — heart/liver/skeletal muscle"
+    local_path: data/raw/E-MTAB-15659
+    counts_file: "counts_matrix.tsv"
+    metadata_file: "sample_metadata.tsv"
+    enabled: true
+
+  # ── Systemic Responder Datasets (placeholders — add paths when available) ─
+
+  liver_responder:
+    type: scrna
+    source: local
+    description: "Liver snRNA-seq from heart failure patients (custom cohort)"
+    local_path: data/raw/liver_responder
+    # Set enabled: true and provide local_path once data is available
+    enabled: false
+    notes: "PLACEHOLDER — replace with actual dataset path"
+
+  muscle_responder:
+    type: scrna
+    source: local
+    description: "Skeletal muscle snRNA-seq from heart failure patients (custom cohort)"
+    local_path: data/raw/muscle_responder
+    enabled: false
+    notes: "PLACEHOLDER — replace with actual dataset path"
+
+  custom_responder:
+    type: scrna
+    source: local
+    description: "User-defined custom responder tissue dataset"
+    local_path: data/raw/custom_responder
+    enabled: false
+    notes: "PLACEHOLDER — user-defined dataset"
+
+# ---------------------------------------------------------------------------
+# Preprocessing Parameters
+# ---------------------------------------------------------------------------
+preprocessing:
+  # Minimum cells a gene must be expressed in to be retained
+  min_cells: 3
+  # Minimum genes detected per cell
+  min_genes: 200
+  # Maximum genes per cell (cells above this are flagged as doublets)
+  max_genes: 8000
+  # Maximum mitochondrial gene fraction
+  max_mito_fraction: 0.20
+  # Number of highly variable genes to select
+  n_top_genes: 3000
+  # Target cell count after downsampling (per dataset, null = no downsampling)
+  downsample_to: 50000
+  # Random seed for reproducibility
+  random_seed: 42
+  # Normalization target sum (library-size normalization)
+  target_sum: 10000
+  # Log-transform after normalization
+  log1p: true
+  # Leiden clustering resolution
+  leiden_resolution: 0.5
+  # Harmony batch correction key (null = skip)
+  batch_key: "dataset"
+  # UMAP parameters
+  umap:
+    n_neighbors: 15
+    n_pcs: 30
+
+# ---------------------------------------------------------------------------
+# Scoring Gene Sets
+# ---------------------------------------------------------------------------
+# Each key defines a named gene program scored via scanpy.tl.score_genes()
+# Add or modify gene lists to match your reference panels
+scoring:
+  fibrosis:
+    description: "Cardiac fibrosis / TGF-beta signaling"
+    genes:
+      - COL1A1
+      - COL1A2
+      - COL3A1
+      - COL4A1
+      - COL6A1
+      - FN1
+      - POSTN
+      - TGFB1
+      - TGFB2
+      - TGFBR1
+      - ACTA2
+      - VIM
+      - S100A4
+      - CTGF
+      - THBS1
+      - LOXL2
+      - MMP2
+      - MMP9
+      - TIMP1
+      - PDGFRA
+
+  ECM:
+    description: "Extracellular matrix remodeling"
+    genes:
+      - MMP1
+      - MMP2
+      - MMP3
+      - MMP9
+      - MMP14
+      - TIMP1
+      - TIMP2
+      - ADAMTS1
+      - ADAMTS5
+      - COL5A1
+      - COL12A1
+      - LAMA2
+      - LAMB1
+      - FBN1
+      - ELN
+      - BGN
+      - DCN
+      - SPARC
+      - TNC
+      - ITGB1
+
+  inflammation:
+    description: "Inflammatory signaling (NF-kB / cytokine)"
+    genes:
+      - TNF
+      - IL1B
+      - IL6
+      - IL18
+      - CXCL8
+      - CXCL10
+      - CCL2
+      - CCL5
+      - NLRP3
+      - CASP1
+      - NFKB1
+      - RELA
+      - PTGS2
+      - ICAM1
+      - VCAM1
+      - CD68
+      - CD14
+      - S100A8
+      - S100A9
+      - CRP
+
+  hypertrophy:
+    description: "Cardiac hypertrophy / fetal gene program"
+    genes:
+      - NPPA
+      - NPPB
+      - MYH7
+      - MYH6
+      - ACTA1
+      - TNNI1
+      - TNNI3
+      - ANKRD1
+      - XIRP2
+      - FHL1
+      - CAMK2A
+      - CAMK2D
+      - MEF2A
+      - GATA4
+      - NKX2-5
+      - HAND1
+      - HAND2
+      - CALR
+      - ATP2A2
+      - PLN
+
+  mito_stress:
+    description: "Mitochondrial stress / oxidative phosphorylation impairment"
+    genes:
+      - MT-CO1
+      - MT-CO2
+      - MT-ND1
+      - MT-ND4
+      - MT-ATP6
+      - PINK1
+      - PRKN
+      - DNM1L
+      - MFN1
+      - MFN2
+      - OPA1
+      - BNIP3
+      - BNIP3L
+      - ATG5
+      - ATG7
+      - BECN1
+      - TFAM
+      - PGC1A
+      - SIRT1
+      - SIRT3
+
+  senescence:
+    description: "Cellular senescence / SASP"
+    genes:
+      - CDKN1A
+      - CDKN2A
+      - TP53
+      - RB1
+      - GLB1
+      - LMNB1
+      - HMGA1
+      - HMGA2
+      - IL6
+      - IL8
+      - CXCL1
+      - MMP3
+      - MMP13
+      - IGFBP3
+      - IGFBP7
+      - PAI1
+      - GDF15
+      - VEGFA
+      - CCND1
+      - MDM2
+
+  secretory:
+    description: "Cardiac secretome / cardiokine program"
+    genes:
+      - NPPA
+      - NPPB
+      - FGF21
+      - IGF1
+      - VEGFA
+      - VEGFB
+      - ANGPT1
+      - ANGPT2
+      - APLN
+      - ELABELA
+      - GDF15
+      - FSTL1
+      - METRNL
+      - IL33
+      - CTGF
+      - THBS1
+      - FHL2
+      - MIF
+      - CXCL12
+      - POSTN
+
+# ---------------------------------------------------------------------------
+# Analysis Parameters
+# ---------------------------------------------------------------------------
+analysis:
+  # Secretome analysis
+  secretome:
+    # Minimum fraction of cells expressing a gene to be considered
+    min_expr_fraction: 0.05
+    # Signal peptide prediction tool (signalp5, deepsig, or precomputed)
+    signal_peptide_method: precomputed
+    signal_peptide_db: data/reference/signal_peptide_genes.txt
+    # Known secreted proteins database (UniProt/HPA)
+    secreted_db: data/reference/secreted_proteins.txt
+
+  # Ligand-receptor analysis
+  ligand_receptor:
+    method: cellchat   # cellchat | nichenet | liana
+    min_cells_per_group: 10
+    pvalue_threshold: 0.05
+    top_n_interactions: 50
+
+  # Cross-tissue overlap
+  overlap:
+    # Tissues to compare against heart
+    comparison_tissues: ["liver", "skeletal_muscle", "adipose", "kidney"]
+    # Minimum overlap score (Jaccard / Fisher) to report
+    min_overlap_score: 0.1
+    # Padj cutoff for differential expression in overlap analysis
+    padj_cutoff: 0.05
+    log2fc_cutoff: 1.0
+
+  # Responder identification
+  responders:
+    # Cell types to prioritize (null = all)
+    target_cell_types: null
+    # Minimum correlation with heart fibrosis score
+    min_correlation: 0.3
+    # Methods: pearson, spearman, distance_corr
+    correlation_method: spearman
+
+  # Ranking / prioritization
+  ranking:
+    # Final output: top N candidates per category
+    top_n: 20
+    # Weights for composite score (must sum to 1.0)
+    weights:
+      scrna_score: 0.30
+      proteomics_score: 0.25
+      lr_score: 0.20
+      cross_tissue_score: 0.15
+      literature_score: 0.10
+
+# ---------------------------------------------------------------------------
+# Execution Parameters
+# ---------------------------------------------------------------------------
+execution:
+  # Number of parallel workers (0 = use all available CPUs)
+  n_workers: 4
+  # Maximum RAM to use in GB (0 = unlimited)
+  max_ram_gb: 0
+  # Chunk size for large matrix operations
+  chunk_size: 10000
+  # Cache intermediate results to disk
+  use_cache: true
+  # Verbosity: DEBUG | INFO | WARNING | ERROR
+  log_level: INFO
+  # Write progress to a machine-readable JSON status file
+  status_file: results/pipeline_status.json
