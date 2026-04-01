@@ -40,7 +40,36 @@ def main():
     parser.add_argument("--n-genes", type=int, default=500)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument(
+        "--embed-dim",
+        type=int,
+        default=64,
+        help="Embedding dimension (default: 64 from grid search)",
+    )
+    parser.add_argument(
+        "--gnn-hidden",
+        type=int,
+        default=64,
+        help="GNN hidden dimension (default: 64 from grid search)",
+    )
+    parser.add_argument(
+        "--gnn-layers",
+        type=int,
+        default=2,
+        help="Number of GNN layers (default: 2 from grid search)",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=1e-3,
+        help="Weight decay (default: 0.001 from grid search)",
+    )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--use-gse141910",
+        action="store_true",
+        help="Include GSE141910 HCM data (slow API mapping)",
+    )
     parser.add_argument("--output-dir", type=str, default="data/reports")
     args = parser.parse_args()
 
@@ -57,6 +86,7 @@ def main():
         data, gene_names, gene_ids, cardiac_modality_features = load_cardiac_data(
             max_genes=args.n_genes,
             seed=args.seed,
+            use_gse141910=args.use_gse141910,
         )
         modality_tensors = {mod: data[mod].features for mod in data}
         args.n_genes = len(gene_ids)
@@ -119,10 +149,23 @@ def main():
     active_modality_features = (
         cardiac_modality_features if use_cardiac else MODALITY_FEATURES
     )
-    model = IrisModel(modality_features=active_modality_features)
+    model = IrisModel(
+        modality_features=active_modality_features,
+        embed_dim=args.embed_dim,
+        fused_dim=args.embed_dim,
+        gnn_hidden=args.gnn_hidden,
+        gnn_out=args.gnn_hidden,
+        gnn_layers=args.gnn_layers,
+    )
     logger.info("Model parameters: %d", sum(p.numel() for p in model.parameters()))
 
-    trainer = IrisTrainer(model=model, lr=args.lr, epochs=args.epochs, seed=args.seed)
+    trainer = IrisTrainer(
+        model=model,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        epochs=args.epochs,
+        seed=args.seed,
+    )
     history = trainer.train(modality_tensors, graph, labels)
     logger.info("Training complete. Final loss: %.4f", history["train_loss"][-1])
 

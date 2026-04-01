@@ -26,10 +26,45 @@ CARDIAC_DATA_ROOT = Path(
     "/Users/ocm/.superset/worktrees/age related heart HF therapy/want-to-find-new-t/data"
 )
 
+_ENSEMBL_TO_GENE: dict[str, str] | None = None
+
+
+def _get_ensembl_to_gene(ensembl_ids: list[str]) -> dict[str, str]:
+    global _ENSEMBL_TO_GENE
+
+    if _ENSEMBL_TO_GENE is not None:
+        return _ENSEMBL_TO_GENE
+
+    import gget
+
+    logger.info("Mapping %d Ensembl IDs to gene symbols...", len(ensembl_ids))
+    chunk_size = 500
+    ensembl_chunks = [
+        ensembl_ids[i : i + chunk_size] for i in range(0, len(ensembl_ids), chunk_size)
+    ]
+
+    all_mappings = {}
+    for i, chunk in enumerate(ensembl_chunks):
+        logger.info(f"  Mapping chunk {i + 1}/{len(ensembl_chunks)}...")
+        try:
+            result = gget.info(chunk)
+            for _, row in result.iterrows():
+                ensembl_id = row["ensembl_id"].split(".")[0]
+                gene_name = row.get("primary_gene_name", "")
+                if gene_name and pd.notna(gene_name):
+                    all_mappings[ensembl_id] = str(gene_name).upper()
+        except Exception as e:
+            logger.warning(f"    Chunk {i + 1} failed: {e}")
+
+    _ENSEMBL_TO_GENE = all_mappings
+    logger.info("  Mapped %d/%d IDs successfully", len(all_mappings), len(ensembl_ids))
+    return all_mappings
+
 
 def load_cardiac_data(
     max_genes: int = 2000,
     seed: int = 42,
+    use_gse141910: bool = False,
 ) -> Tuple[Dict[str, ModalityData], List[str], List[int], Dict[str, int]]:
     """Load and align cardiac multi-omics data.
 
@@ -44,15 +79,22 @@ def load_cardiac_data(
     prot_genes, prot_mat = _load_olink_proteomics()
     scrna_genes, scrna_mat = _load_scrna_aging_de()
     de_genes, de_mat = _load_snrna_de()
+    gse278576_genes, gse278576_mat = _load_gse278576()
 
-    # Build gene universe prioritizing multi-modality coverage
     gene_universe = _build_gene_universe(
         bulk_genes,
+        gse278576_genes,
         prot_genes,
         scrna_genes,
         de_genes,
         bulk_mat,
+        gse278576_mat,
         max_genes=max_genes,
+    )
+
+    target_genes = set(gene_universe)
+    gse141910_genes, gse141910_mat = _load_gse141910(
+        target_genes, use_api=use_gse141910
     )
     n_genes = len(gene_universe)
     gene_ids = list(range(1, n_genes + 1))
@@ -64,6 +106,8 @@ def load_cardiac_data(
 
     for name, genes, mat in [
         ("bulk_rna", bulk_genes, bulk_mat),
+        ("gse141910", gse141910_genes, gse141910_mat),
+        ("gse278576", gse278576_genes, gse278576_mat),
         ("proteomics", prot_genes, prot_mat),
         ("scrna", scrna_genes, scrna_mat),
         ("epigenomics", de_genes, de_mat),
@@ -128,6 +172,106 @@ def _load_bulk_rna() -> Tuple[List[str], torch.Tensor]:
         "  bulk_rna raw: %d genes × %d samples", len(unique_names), mat.shape[1]
     )
     return unique_names, mat
+
+
+def _load_gse141910(
+    target_genes: set[str] | None = None, use_api: bool = False
+) -> Tuple[List[str], torch.Tensor]:
+    import gzip
+    from collections import defaultdict
+
+    raw_dir = CARDIAC_DATA_ROOT / "geo" / "GSE141910" / "raw"
+    logger.info("Loading GSE141910 HCM from %s", raw_dir)
+
+    gsm_files = sorted(raw_dir.glob("GSM*.csv.gz"))
+    if not gsm_files:
+        logger.warning("  No GSM files found, skipping GSE141910")
+        return [], torch.zeros(0, 0)
+
+    logger.info("  Found %d sample files", len(gsm_files))
+
+    gene_data = defaultdict(list)
+    all_ensembl_ids = set()
+
+    for i, f in enumerate(gsm_files):
+        with gzip.open(f, "rt") as fh:
+            for line in fh:
+                parts = line.strip().split(",")
+                if len(parts) >= 2:
+                    ensembl_id = parts[0].strip('"')
+                    if ensembl_id.startswith("ENSG"):
+                        try:
+                            value = float(parts[1])
+                        except ValueError:
+                            value = 0.0
+                        gene_data[ensembl_id].append(value)
+                        all_ensembl_ids.add(ensembl_id)
+
+    ensembl_list = sorted(all_ensembl_ids)
+
+    if not use_api:
+        logger.info("  Skipping GSE141910 (use_api=False, slow Ensembl mapping)")
+        return [], torch.zeros(0, 0)
+
+    if target_genes:
+        mapping = _get_ensembl_to_gene(ensembl_list)
+        filtered_genes = []
+        filtered_rows = []
+        for ensembl_id in ensembl_list:
+            gene_name = mapping.get(ensembl_id, "")
+            if gene_name and gene_name in target_genes:
+                filtered_genes.append(gene_name)
+                filtered_rows.append(gene_data[ensembl_id])
+        gene_names = filtered_genes
+        rows = filtered_rows
+    else:
+        mapping = _get_ensembl_to_gene(ensembl_list[:1000])
+        gene_names = []
+        rows = []
+        for ensembl_id in ensembl_list[:1000]:
+            gene_name = mapping.get(ensembl_id, "")
+            if gene_name:
+                gene_names.append(gene_name)
+                rows.append(gene_data[ensembl_id])
+
+    if not gene_names:
+        logger.warning("  No gene symbols mapped, skipping GSE141910")
+        return [], torch.zeros(0, 0)
+
+    mat = torch.tensor(rows, dtype=torch.float32)
+    mat = mat.T
+
+    logger.info("  gse141910: %d genes × %d samples", len(gene_names), mat.shape[1])
+    return gene_names, mat
+
+
+def _load_gse278576() -> Tuple[List[str], torch.Tensor]:
+    """Load GSE278576 young vs old DE from buttoned-laugh worktree."""
+    gse278576_path = Path(
+        "/Users/ocm/.superset/worktrees/age related heart HF therapy/buttoned-laugh/data/processed/GSE278576"
+    )
+    de_path = gse278576_path / "gse278576_young_vs_old_full_cohort_de.tsv"
+
+    if not de_path.exists():
+        logger.warning("  GSE278576 not found, skipping")
+        return [], torch.zeros(0, 0)
+
+    logger.info("Loading GSE278576 aging DE from %s", de_path)
+    df = pd.read_csv(de_path, sep="\t")
+
+    df = df[df["species_bucket"] == "human"]
+
+    gene_names = df["feature"].str.upper().tolist()
+    logfc = df["log2_fc_old_vs_young"].values
+    pval = df["adj_p_value"].values
+
+    nlogp = -np.log10(np.clip(pval, 1e-300, 1.0))
+    features = np.column_stack([logfc, nlogp])
+
+    logger.info(
+        "  gse278576: %d genes × %d features", len(gene_names), features.shape[1]
+    )
+    return gene_names, torch.tensor(features, dtype=torch.float32)
 
 
 def _load_olink_proteomics() -> Tuple[List[str], torch.Tensor]:
@@ -368,25 +512,33 @@ def _load_snrna_de() -> Tuple[List[str], torch.Tensor]:
 
 def _build_gene_universe(
     bulk_genes: List[str],
+    gse278576_genes: List[str],
     prot_genes: List[str],
     scrna_genes: List[str],
     de_genes: List[str],
     bulk_mat: torch.Tensor,
+    gse278576_mat: torch.Tensor,
     max_genes: int = 2000,
 ) -> List[str]:
-    """Build gene universe prioritizing multi-modality and high-variance genes."""
-    # Count how many modalities each gene appears in
-    all_gene_sets = [set(bulk_genes), set(prot_genes), set(scrna_genes), set(de_genes)]
+    all_gene_sets = [
+        set(bulk_genes),
+        set(gse278576_genes),
+        set(prot_genes),
+        set(scrna_genes),
+        set(de_genes),
+    ]
     gene_counts: Dict[str, int] = {}
     for gs in all_gene_sets:
         for g in gs:
             gene_counts[g] = gene_counts.get(g, 0) + 1
 
-    # Compute variance for bulk RNA genes
     gene_var: Dict[str, float] = {}
     for i, g in enumerate(bulk_genes):
         if i < bulk_mat.shape[0]:
             gene_var[g] = bulk_mat[i].var().item()
+    for i, g in enumerate(gse278576_genes):
+        if i < gse278576_mat.shape[0]:
+            gene_var[g] = gene_var.get(g, 0) + gse278576_mat[i].var().item() * 0.5
 
     # Score: modality_count * 1000 + variance_rank
     # First: all genes in proteomics (ensures good coverage)
