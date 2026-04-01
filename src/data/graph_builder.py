@@ -48,6 +48,51 @@ MUSCLE_PATHWAY_GENES: Dict[str, List[str]] = {
     ],
 }
 
+# Cardiac-specific pathways for HF/remodeling
+CARDIAC_PATHWAY_GENES: Dict[str, List[str]] = {
+    "cardiac_contraction": [
+        "MYH7", "MYH6", "TNNT2", "TNNI3", "TPM1", "ACTC1",
+        "MYL2", "MYL3", "MYBPC3", "TTN", "ACTN2",
+    ],
+    "calcium_handling": [
+        "RYR2", "PLN", "CASQ2", "ATP2A2", "CALM1",
+        "CACNA1C", "SLC8A1", "CAMK2D",
+    ],
+    "RAAS_system": [
+        "ACE", "ACE2", "AGT", "AGTR1", "AGTR2", "REN",
+        "APLN", "APLNR",
+    ],
+    "cardiac_fibrosis": [
+        "COL1A1", "COL1A2", "COL3A1", "POSTN", "CCN2", "TNC",
+        "FN1", "LOX", "LOXL2", "FAP", "TGFB1", "TGFBR1",
+        "SMAD2", "SMAD3", "LTBP2", "DCN",
+    ],
+    "natriuretic_peptides": [
+        "NPPB", "NPPA", "NPR1", "NPR2", "NPR3",
+    ],
+    "cardiac_hypertrophy": [
+        "NFATC1", "NFATC2", "GATA4", "MEF2A", "MEF2C",
+        "MAPK1", "MAPK3", "MAPK14", "JAK2", "STAT3",
+        "HAND1", "HAND2", "NKX2-5", "TBX5",
+    ],
+    "cardiac_angiogenesis": [
+        "VEGFA", "KDR", "FLT1", "PECAM1", "CDH5",
+        "NOTCH1", "DLL4", "ENG", "ANGPT1", "ANGPT2", "TEK",
+    ],
+    "cardiac_inflammation": [
+        "IL6", "IL6R", "IL1B", "TNF", "NLRP3", "IL18",
+        "IL33", "IL1RL1", "NFKB1", "RELA", "TLR4",
+    ],
+    "cardiac_metabolism": [
+        "PPARA", "PPARGC1A", "CPT1B", "CPT2", "CD36",
+        "SLC2A4", "MTOR", "PRKAA1", "PRKAA2", "SIRT1", "SIRT3",
+    ],
+    "wnt_cardiac": [
+        "WNT9A", "WNT3A", "WNT5A", "CTNNB1", "GSK3B",
+        "SFRP1", "SFRP2", "DKK1", "DKK3",
+    ],
+}
+
 
 @dataclass
 class GraphBuilder:
@@ -190,10 +235,11 @@ class GraphBuilder:
         gene_names: List[str],
         name_to_idx: Dict[str, int],
     ) -> List[Tuple[int, int]]:
-        """Build pathway edges from hardcoded muscle/sarcopenia pathways."""
+        """Build pathway edges from hardcoded muscle/sarcopenia + cardiac pathways."""
         edges: List[Tuple[int, int]] = []
 
-        for pathway_name, pathway_genes in MUSCLE_PATHWAY_GENES.items():
+        all_pathways = {**MUSCLE_PATHWAY_GENES, **CARDIAC_PATHWAY_GENES}
+        for pathway_name, pathway_genes in all_pathways.items():
             # Find which pathway genes are in our gene set
             member_indices = []
             for g in pathway_genes:
